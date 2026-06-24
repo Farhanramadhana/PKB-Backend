@@ -1,0 +1,32 @@
+# Environment
+.env
+.env.local
+
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build output
+dist/
+
+# Test artifacts
+*.test
+*.out
+coverage.out
+coverage.html
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go workspace (local overrides)
+go.work.sum

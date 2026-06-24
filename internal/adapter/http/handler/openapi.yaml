@@ -1,0 +1,951 @@
+openapi: "3.0.3"
+info:
+  title: TPS-PKB — Sistem Pajak Kendaraan Bermotor
+  description: |
+    REST API backend untuk sistem pemrosesan Pajak Kendaraan Bermotor (PKB) Samsat.
+
+    ## Autentikasi
+    Gunakan endpoint `POST /api/v1/auth/login` untuk mendapatkan JWT token,
+    kemudian sertakan header `Authorization: Bearer <token>` pada setiap request.
+
+    ## Kredensial Uji
+    - **Username:** `admin`
+    - **Password:** `Pretest@2025`
+  version: "1.0.0"
+  contact:
+    name: BPKA
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: http://localhost:8080
+    description: Docker compose
+
+tags:
+  - name: Auth
+    description: Autentikasi pengguna
+  - name: Health
+    description: Status layanan
+  - name: Wajib Pajak
+    description: Manajemen data wajib pajak (individu & badan usaha)
+  - name: Kewajiban Pajak
+    description: Kewajiban pajak tahunan per kendaraan
+  - name: Pembayaran
+    description: Pencatatan transaksi pembayaran pajak
+  - name: Denda
+    description: Kalkulasi dan riwayat denda
+  - name: Laporan
+    description: Laporan rekapitulasi pembayaran
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Cek status layanan. Tidak memerlukan autentikasi.
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Layanan berjalan normal
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+                            example: up
+                          service:
+                            type: string
+                            example: tps-pkb
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      description: Autentikasi pengguna dan dapatkan JWT access token.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            example:
+              username: admin
+              password: Pretest@2025
+      responses:
+        "200":
+          description: Login berhasil
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/TokenResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/wajib-pajak:
+    get:
+      tags: [Wajib Pajak]
+      summary: Daftar wajib pajak
+      description: |
+        Ambil daftar wajib pajak dengan filter opsional.
+        - **ADMIN / PETUGAS**: Lihat semua wajib pajak
+        - **WAJIB_PAJAK**: Hanya data milik sendiri
+      operationId: listWajibPajak
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: nama
+          in: query
+          schema:
+            type: string
+          description: Filter berdasarkan nama (partial match)
+        - name: jenis
+          in: query
+          schema:
+            $ref: "#/components/schemas/JenisWajibPajak"
+          description: Filter berdasarkan jenis wajib pajak
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+          description: Filter berdasarkan status aktif
+      responses:
+        "200":
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/WajibPajak"
+                      meta:
+                        $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      tags: [Wajib Pajak]
+      summary: Buat wajib pajak baru
+      description: Buat data wajib pajak baru. Hanya ADMIN dan PETUGAS.
+      operationId: createWajibPajak
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWajibPajakRequest"
+            examples:
+              individu:
+                summary: Wajib pajak individu
+                value:
+                  nama: Budi Santoso
+                  jenis: INDIVIDU
+                  nik: "3201234567890001"
+                  alamat: Jl. Merdeka No. 1, Jakarta
+                  no_telp: "081234567890"
+                  email: budi@example.com
+              badan_usaha:
+                summary: Badan usaha
+                value:
+                  nama: PT Maju Bersama
+                  jenis: BADAN_USAHA
+                  npwp: "012345678901234"
+                  nib: NIB123456
+                  alamat: Jl. Sudirman Kav. 52
+                  no_telp: "02112345678"
+                  email: info@majubersama.com
+      responses:
+        "201":
+          description: Berhasil dibuat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WajibPajak"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/wajib-pajak/{id}:
+    get:
+      tags: [Wajib Pajak]
+      summary: Detail wajib pajak
+      operationId: getWajibPajak
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IDParam"
+      responses:
+        "200":
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WajibPajak"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    put:
+      tags: [Wajib Pajak]
+      summary: Update wajib pajak
+      description: Update data wajib pajak. Hanya ADMIN dan PETUGAS.
+      operationId: updateWajibPajak
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IDParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWajibPajakRequest"
+      responses:
+        "200":
+          description: Berhasil diupdate
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WajibPajak"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/kewajiban-pajak:
+    get:
+      tags: [Kewajiban Pajak]
+      summary: Daftar kewajiban pajak
+      description: |
+        Ambil daftar kewajiban pajak tahunan.
+        - **WAJIB_PAJAK**: Hanya kewajiban milik sendiri
+      operationId: listKewajiban
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: wajib_pajak_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/StatusKewajiban"
+        - name: tahun_pajak
+          in: query
+          schema:
+            type: integer
+            example: 2025
+      responses:
+        "200":
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/KewajibanPajak"
+                      meta:
+                        $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      tags: [Kewajiban Pajak]
+      summary: Buat kewajiban pajak
+      description: Buat kewajiban pajak tahunan untuk kendaraan. Hanya ADMIN.
+      operationId: createKewajiban
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateKewajibanRequest"
+      responses:
+        "201":
+          description: Berhasil dibuat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/KewajibanPajak"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/pembayaran:
+    post:
+      tags: [Pembayaran]
+      summary: Catat pembayaran pajak
+      description: |
+        Catat transaksi pembayaran terhadap kewajiban pajak.
+        Denda dihitung dan disimpan secara otomatis:
+        - **Denda Telat Bayar**: 2% × pokok pajak (jika tanggal bayar > periode final)
+        - **Denda Kurang Bayar**: 1% × selisih kekurangan (jika total bayar < pokok)
+        - **Denda Gabungan**: Keduanya jika terlambat sekaligus kurang bayar
+      operationId: createPembayaran
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePembayaranRequest"
+            example:
+              kewajiban_id: "550e8400-e29b-41d4-a716-446655440000"
+              tanggal_bayar: "2025-06-01"
+              jumlah_bayar: "1500000"
+              catatan_petugas: Pembayaran lunas
+      responses:
+        "201":
+          description: Pembayaran berhasil dicatat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PembayaranResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/denda/{id}:
+    get:
+      tags: [Denda]
+      summary: Kalkulasi denda kewajiban
+      description: |
+        Hitung denda berdasarkan kewajiban pajak (read-only, tidak menyimpan).
+        Gunakan `id` dari kewajiban pajak, bukan ID denda.
+      operationId: getDenda
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID kewajiban pajak
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Denda"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/laporan:
+    get:
+      tags: [Laporan]
+      summary: Laporan pembayaran
+      description: |
+        Rekap total kewajiban, pembayaran, denda, dan sisa tagihan
+        dalam periode tertentu. Hanya ADMIN dan PETUGAS.
+      operationId: getLaporan
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2025-01-01"
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2025-12-31"
+        - name: wajib_pajak_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Laporan"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    IDParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    PageParam:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    LimitParam:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  schemas:
+    # ---- Enums ----
+    JenisWajibPajak:
+      type: string
+      enum: [INDIVIDU, BADAN_USAHA]
+
+    StatusKewajiban:
+      type: string
+      enum: [BELUM_BAYAR, LUNAS, KURANG_BAYAR, LEBIH_BAYAR]
+
+    StatusPembayaran:
+      type: string
+      enum: [LUNAS, KURANG_BAYAR, LEBIH_BAYAR]
+
+    JenisDenda:
+      type: string
+      enum: [TELAT_BAYAR, KURANG_BAYAR]
+
+    # ---- Auth ----
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: admin
+        password:
+          type: string
+          format: password
+          example: Pretest@2025
+
+    TokenResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT access token
+        expires_in:
+          type: integer
+          description: Token TTL dalam detik
+          example: 86400
+
+    # ---- Wajib Pajak ----
+    WajibPajak:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        nama:
+          type: string
+          example: Budi Santoso
+        jenis:
+          $ref: "#/components/schemas/JenisWajibPajak"
+        nik:
+          type: string
+          description: Nomor Induk Kependudukan (16 digit, hanya INDIVIDU)
+          example: "3201234567890001"
+        npwp:
+          type: string
+          description: Nomor Pokok Wajib Pajak (15 digit, hanya BADAN_USAHA)
+        nib:
+          type: string
+          description: Nomor Induk Berusaha (hanya BADAN_USAHA)
+        alamat:
+          type: string
+        no_telp:
+          type: string
+        email:
+          type: string
+          format: email
+        is_active:
+          type: boolean
+          default: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateWajibPajakRequest:
+      type: object
+      required: [nama, jenis, alamat]
+      properties:
+        nama:
+          type: string
+          minLength: 2
+          maxLength: 255
+        jenis:
+          $ref: "#/components/schemas/JenisWajibPajak"
+        nik:
+          type: string
+          description: Wajib untuk INDIVIDU. Harus 16 digit numerik.
+          example: "3201234567890001"
+        npwp:
+          type: string
+          description: Wajib untuk BADAN_USAHA. Harus 15 digit numerik.
+        nib:
+          type: string
+          description: Wajib untuk BADAN_USAHA.
+        alamat:
+          type: string
+        no_telp:
+          type: string
+        email:
+          type: string
+          format: email
+
+    UpdateWajibPajakRequest:
+      type: object
+      properties:
+        nama:
+          type: string
+        alamat:
+          type: string
+        no_telp:
+          type: string
+        email:
+          type: string
+          format: email
+        is_active:
+          type: boolean
+
+    # ---- Kewajiban Pajak ----
+    KewajibanPajak:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        kendaraan_id:
+          type: string
+          format: uuid
+        wajib_pajak_id:
+          type: string
+          format: uuid
+        tahun_pajak:
+          type: integer
+          example: 2025
+        periode_awal:
+          type: string
+          format: date
+          example: "2025-01-01"
+        periode_final:
+          type: string
+          format: date
+          example: "2025-12-31"
+        pokok_pajak:
+          type: string
+          description: Nilai pokok pajak dalam Rupiah
+          example: "2500000"
+        status:
+          $ref: "#/components/schemas/StatusKewajiban"
+        total_dibayar:
+          type: string
+          description: Total yang sudah dibayarkan
+          example: "0"
+        created_at:
+          type: string
+          format: date-time
+
+    CreateKewajibanRequest:
+      type: object
+      required: [kendaraan_id, tahun_pajak, periode_awal, periode_final, pokok_pajak]
+      properties:
+        kendaraan_id:
+          type: string
+          format: uuid
+        tahun_pajak:
+          type: integer
+          example: 2025
+        periode_awal:
+          type: string
+          format: date
+          example: "2025-01-01"
+        periode_final:
+          type: string
+          format: date
+          example: "2025-12-31"
+        pokok_pajak:
+          type: string
+          description: Nilai pokok pajak dalam Rupiah
+          example: "2500000"
+
+    # ---- Pembayaran ----
+    CreatePembayaranRequest:
+      type: object
+      required: [kewajiban_id, tanggal_bayar, jumlah_bayar]
+      properties:
+        kewajiban_id:
+          type: string
+          format: uuid
+        tanggal_bayar:
+          type: string
+          format: date
+          description: Format YYYY-MM-DD. Tidak boleh tanggal masa depan.
+          example: "2025-06-01"
+        jumlah_bayar:
+          type: string
+          description: Jumlah pembayaran dalam Rupiah. Harus > 0.
+          example: "2500000"
+        catatan_petugas:
+          type: string
+
+    PembayaranResponse:
+      type: object
+      properties:
+        pembayaran:
+          $ref: "#/components/schemas/Pembayaran"
+        denda:
+          type: array
+          items:
+            $ref: "#/components/schemas/Denda"
+
+    Pembayaran:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        kewajiban_id:
+          type: string
+          format: uuid
+        wajib_pajak_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        tanggal_bayar:
+          type: string
+          format: date
+        jumlah_bayar:
+          type: string
+          example: "2500000"
+        status:
+          $ref: "#/components/schemas/StatusPembayaran"
+        catatan_petugas:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ---- Denda ----
+    Denda:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        kewajiban_id:
+          type: string
+          format: uuid
+        pembayaran_id:
+          type: string
+          format: uuid
+        jenis:
+          $ref: "#/components/schemas/JenisDenda"
+        dasar:
+          type: string
+          description: Nilai dasar penghitungan denda
+          example: "2500000"
+        tarif:
+          type: string
+          description: Tarif denda (0.02 atau 0.01)
+          example: "0.02"
+        jumlah:
+          type: string
+          description: Jumlah denda = dasar × tarif
+          example: "50000"
+        created_at:
+          type: string
+          format: date-time
+
+    # ---- Laporan ----
+    Laporan:
+      type: object
+      properties:
+        periode_awal:
+          type: string
+          format: date
+        periode_akhir:
+          type: string
+          format: date
+        total_kewajiban:
+          type: string
+          description: Total pokok pajak dalam periode
+        total_dibayar:
+          type: string
+          description: Total pembayaran diterima
+        total_denda:
+          type: string
+          description: Total denda yang dikenakan
+        total_sisa:
+          type: string
+          description: Sisa tagihan belum terbayar
+        jumlah_kewajiban:
+          type: integer
+          description: Jumlah kewajiban pajak dalam periode
+        jumlah_lunas:
+          type: integer
+        jumlah_kurang_bayar:
+          type: integer
+        jumlah_belum_bayar:
+          type: integer
+
+    # ---- Envelope ----
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          type: object
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              enum:
+                - VALIDATION_ERROR
+                - UNAUTHORIZED
+                - FORBIDDEN
+                - NOT_FOUND
+                - CONFLICT
+                - UNPROCESSABLE
+                - INTERNAL_ERROR
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+
+    PaginationMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 100
+
+  responses:
+    ValidationError:
+      description: Request tidak valid
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            message: validasi gagal
+            error:
+              code: VALIDATION_ERROR
+              details:
+                - field: nik
+                  message: NIK harus 16 digit numerik
+
+    Unauthorized:
+      description: Token tidak valid atau tidak disertakan
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            message: token tidak valid
+            error:
+              code: UNAUTHORIZED
+
+    Forbidden:
+      description: Tidak memiliki izin akses
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            message: akses ditolak
+            error:
+              code: FORBIDDEN
+
+    NotFound:
+      description: Data tidak ditemukan
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            message: data tidak ditemukan
+            error:
+              code: NOT_FOUND
+
+    Conflict:
+      description: Data sudah ada (duplikat NIK/NPWP)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            message: NIK sudah terdaftar
+            error:
+              code: CONFLICT
+
+    UnprocessableEntity:
+      description: Pelanggaran aturan bisnis
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            message: wajib pajak tidak aktif
+            error:
+              code: UNPROCESSABLE

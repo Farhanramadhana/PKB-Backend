@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS denda;
+DROP TABLE IF EXISTS pembayaran;
+DROP TABLE IF EXISTS kewajiban_pajak;
+DROP TABLE IF EXISTS kendaraan;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS wajib_pajak;
+DROP TYPE IF EXISTS jenis_denda;
+DROP TYPE IF EXISTS status_pembayaran;
+DROP TYPE IF EXISTS status_kewajiban;
+DROP TYPE IF EXISTS role_user;
+DROP TYPE IF EXISTS jenis_wajib_pajak;
